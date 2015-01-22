@@ -1,0 +1,71 @@
+K 25
+svn:wc:ra_dav:version-url
+V 38
+/svn/!svn/ver/2/trunk/pintos/src/utils
+END
+backtrace
+K 25
+svn:wc:ra_dav:version-url
+V 48
+/svn/!svn/ver/2/trunk/pintos/src/utils/backtrace
+END
+setitimer-helper.c
+K 25
+svn:wc:ra_dav:version-url
+V 57
+/svn/!svn/ver/2/trunk/pintos/src/utils/setitimer-helper.c
+END
+.gitignore
+K 25
+svn:wc:ra_dav:version-url
+V 49
+/svn/!svn/ver/2/trunk/pintos/src/utils/.gitignore
+END
+pintos-gdb
+K 25
+svn:wc:ra_dav:version-url
+V 49
+/svn/!svn/ver/2/trunk/pintos/src/utils/pintos-gdb
+END
+squish-pty.c
+K 25
+svn:wc:ra_dav:version-url
+V 51
+/svn/!svn/ver/2/trunk/pintos/src/utils/squish-pty.c
+END
+Pintos.pm
+K 25
+svn:wc:ra_dav:version-url
+V 48
+/svn/!svn/ver/2/trunk/pintos/src/utils/Pintos.pm
+END
+pintos
+K 25
+svn:wc:ra_dav:version-url
+V 45
+/svn/!svn/ver/2/trunk/pintos/src/utils/pintos
+END
+pintos-mkdisk
+K 25
+svn:wc:ra_dav:version-url
+V 52
+/svn/!svn/ver/2/trunk/pintos/src/utils/pintos-mkdisk
+END
+Makefile
+K 25
+svn:wc:ra_dav:version-url
+V 47
+/svn/!svn/ver/2/trunk/pintos/src/utils/Makefile
+END
+squish-unix.c
+K 25
+svn:wc:ra_dav:version-url
+V 52
+/svn/!svn/ver/2/trunk/pintos/src/utils/squish-unix.c
+END
+pintos-set-cmdline
+K 25
+svn:wc:ra_dav:version-url
+V 57
+/svn/!svn/ver/2/trunk/pintos/src/utils/pintos-set-cmdline
+END
