@@ -20,8 +20,6 @@
    of thread.h for details. */
 #define THREAD_MAGIC 0xcd6abf4b
 
-uint32_t thread_stack_ofs = offsetof (struct thread, stack);
-
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list ready_list;
@@ -279,10 +277,26 @@ thread_unblock (struct thread *t)
                 intr_yield_on_return();
             else
                 thread_yield();
-
         }
     
   } 
+
+
+
+//  int max_priority = list_entry(ready_e,struct thread, elem)->priority;
+//  
+//  /* L: We just handle normal thread priority change, idle is not
+//   * one of them. We do not handle it here, just let it pass. */
+//  if((thread_current ()->priority < max_priority) &&(thread_current() != idle_thread))
+//  {
+//    /* L: unblock maybe called in intr-context or non-intr-context,
+//     * they are different in handling. */
+//    if (intr_context ())
+//      intr_yield_on_return ();
+//    else
+//      thread_yield ();
+//  }
+  
   intr_set_level (old_level);
 }
 
@@ -353,10 +367,10 @@ thread_yield (void)
   old_level = intr_disable ();
   
   if (cur != idle_thread) 
-    /* always put thread into ready_list in ordered */
+    /* L:put it to the ready_list with priority */
     list_insert_ordered(&ready_list,&cur->elem,priority_higher,NULL);
-
   cur->status = THREAD_READY;
+  
   schedule ();
   intr_set_level (old_level);
 }
@@ -382,23 +396,31 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-    //we need to set old priority as well,and yield if change to lower priority 
-    struct list_elem *e = list_max (&ready_list, priority_higher, NULL);
-    bool yd = false;
-    if(!list_empty(&ready_list) &&
-         (thread_current ()->priority < list_entry(e,struct thread, elem)->priority))
-            yd = true;
-
-  if(thread_current()->priority == thread_current()->priority_old)
+  /*[X] if we use advanced scheculer, we can't set priority by ourselves*/
+ // if(thread_mlfqs)
+//	return;
+  struct thread *cur = thread_current();
+  if(cur->priority == cur->priority_old)
   {
-    thread_current()->priority = new_priority;
-    thread_current()->priority_old = new_priority;
+    cur->priority = new_priority;
+    cur->priority_old = new_priority;
   }
   else
-    thread_current()->priority_old = new_priority;
-
-    if(yd)
-        thread_yield();
+  {
+    cur->priority_old = new_priority;
+  }
+  
+  /* L: priority-change test requires an immediately yield when
+   * cur->priority < max_priority(ready_list).
+   * A check is needed here. */
+  if(!list_empty(&ready_list))
+  {
+    struct list_elem *ready_e = list_max (&ready_list, priority_higher, NULL);
+    int max_priority = list_entry(ready_e,struct thread, elem)->priority;
+    
+    if(thread_current ()->priority < max_priority)
+      thread_yield();
+  }
 }
 
 /* Returns the current thread's priority. */
@@ -412,31 +434,32 @@ thread_get_priority (void)
 void
 thread_set_nice (int nice UNUSED) 
 {
-  /* Not yet implemented. */
+  /* [X]set nice value */
+ // thread_current()->nice=nice;
 }
 
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void) 
 {
-  /* Not yet implemented. */
-  return 0; 
+  /*[X] return the nice value of the thread */
+  return 0; //thread_current()->nice;
 }
 
 /* Returns 100 times the system load average. */
 int
 thread_get_load_avg (void) 
 {
-  /* Not yet implemented. */
-  return 0; 
+  /* [X] the int64 problem */
+  return 0; //F2ITNEAR(FMULI(load_avg,100));
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void) 
 {
-  /* Not yet implemented. */
-  return 0; 
+  /* [X] */
+  return 0; //F2ITNEAR(FMULI(thread_current()->recent_cpu,100));
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
@@ -522,9 +545,20 @@ init_thread (struct thread *t, const char *name, int priority)
   t->status = THREAD_BLOCKED;
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
+  
+///  if(thread_mlfqs)
+//  {
+//	t->recent_cpu=0;
+//	t->nice=0;
+//	renew_priority(t);
+	//printf("[X]%d\n",t->priority);
+//  }
+//  else
+//  {
   t->priority = priority;
-  // initial old priority as equal as priority
-  t->priority_old = t->priority;
+  /* Initialize old_priority */
+  t->priority_old=t->priority;
+//}
   t->magic = THREAD_MAGIC;
   list_push_back (&all_list, &t->allelem);
 }
@@ -554,8 +588,8 @@ next_thread_to_run (void)
     return idle_thread;
   else
     {
-  //   return list_entry (list_pop_front (&ready_list), struct thread, elem);
-    struct list_elem *ready_e = list_max (&ready_list, priority_lower, NULL);
+     //return list_entry (list_pop_front (&ready_list), struct thread, elem);
+     struct list_elem *ready_e = list_max (&ready_list, priority_lower, NULL);
      return list_entry (ready_e, struct thread, elem);
     }
 }
@@ -631,8 +665,9 @@ schedule (void)
   /* L: Move the remove from next_thread_to_run to here. */
   list_remove (&next->elem);
   if (cur != next)
+  {
     prev = switch_threads (cur, next);
-
+  }
   thread_schedule_tail (prev);
 }
 
@@ -652,7 +687,8 @@ allocate_tid (void)
 
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
-//
+uint32_t thread_stack_ofs = offsetof (struct thread, stack);
+
 /*By W:Sleep the thread,called by timer_sleep()*/
 void
 thread_sleep(int64_t s_ticks) 
@@ -760,6 +796,24 @@ bool cond_lower (const struct list_elem *a,
   return false;
 }
 
+/* L:Debug func dump the ready_list */
+/* Debug:dump the ready list */
+/*
+void ready_list_dump(void)
+{
+  struct list_elem *e;
+  struct thread *f;
+  if(list_size(&ready_list)!=0){
+  printf("[%lld,dump ready list]\n",(uint64_t)timer_ticks());
+  for (e = list_begin (&ready_list); e != list_end (&ready_list);
+           e = list_next (e))
+        {
+          f = list_entry (e, struct thread, elem);
+          printf("[* %s is ready,pri:%d]\n",f->name,f->priority);
+        }
+      }
+}
+*/
 /* L: Check if some waiter has a higher priority,
  * that is, we need a donation. */
 bool donate_check (void)
