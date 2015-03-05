@@ -88,18 +88,7 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
-    int priority_old;                   /* L: old priority stores the pri before donated */
     struct list_elem allelem;           /* List element for all threads list. */
-    
-    /*By W:record the wakeup_tick */
-    int64_t wakeup_tick;
-    
-    /*[X]nice point*/
-////    int32_t nice;
-    
-    /*[X]recent CPU*/
-///    int64_t recent_cpu;
-    
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
@@ -112,10 +101,6 @@ struct thread
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
   };
-/* L: If alloc mem before memory is ready, system will halt -_-
- * it will be ready when main() change it.
- * */
-bool alloc_ready;
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
@@ -152,17 +137,5 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
-
-void thread_wakeup(void);
-void thread_sleep(int64_t);
-bool sleep_func(const struct list_elem *,const struct list_elem *,
-                 void *);
-/*  the priority_decrease func */
-list_less_func priority_decrease;
-list_less_func priority_increase;
-/*  make the waiters in order */
-list_less_func condition_lower;
-
-void donate(void);
 
 #endif /* threads/thread.h */

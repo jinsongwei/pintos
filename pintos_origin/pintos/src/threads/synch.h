@@ -10,11 +10,6 @@ struct semaphore
     unsigned value;             /* Current value. */
     struct list waiters;        /* List of waiting threads. */
   };
-struct semaphore_elem
-{
-    struct list_elem elem;      
-    struct semaphore semaphore; 
-};  
 
 void sema_init (struct semaphore *, unsigned value);
 void sema_down (struct semaphore *);
@@ -22,20 +17,12 @@ bool sema_try_down (struct semaphore *);
 void sema_up (struct semaphore *);
 void sema_self_test (void);
 
+/* Lock. */
 struct lock 
-{
-    int id;
+  {
     struct thread *holder;      /* Thread holding lock (for debugging). */
     struct semaphore semaphore; /* Binary semaphore controlling access. */
-};
-  
-struct lock_elem
-{
-    int id;
-    struct lock *lock; 
-    struct list_elem elem;
-};
-struct list lock_list;
+  };
 
 void lock_init (struct lock *);
 void lock_acquire (struct lock *);

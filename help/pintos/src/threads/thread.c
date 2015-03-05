@@ -19,7 +19,7 @@
    Used to detect stack overflow.  See the big comment at the top
    of thread.h for details. */
 #define THREAD_MAGIC 0xcd6abf4b
-
+// have no idea why switch.S doesn't recognize this. 
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
 
 /* List of processes in THREAD_READY state, that is, processes
@@ -73,14 +73,6 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
-
-
-
-/* L: This 2 funcs handles donate passively */
-bool donate_check (void);
-void donate_do (void);
-
-
 
 
 /* Initializes the threading system by transforming the code
@@ -265,21 +257,16 @@ thread_unblock (struct thread *t)
     struct thread *cur = thread_current();
 
   /* put it to the ready_list order by priority */
-  list_insert_ordered(&ready_list,&t->elem,priority_higher,NULL);
+  list_insert_ordered(&ready_list,&t->elem,priority_decrease,NULL);
   
   t->status = THREAD_READY;
 
   if(cur != idle_thread)
   {
-  /* L: Some thread t_low may unblock a higher priority thread t_high,
-   * in such case t_low must yield cpu to t_high immediately */
-  struct list_elem *e = list_max (&ready_list, priority_lower, NULL);
+    //yield ????????????????
+  struct list_elem *e = list_max (&ready_list, priority_increase, NULL);
         if(cur->priority < list_entry(e,struct thread,elem)->priority){
-            if(intr_context())
-                intr_yield_on_return();
-            else
                 thread_yield();
-
         }
     
   } 
@@ -354,7 +341,7 @@ thread_yield (void)
   
   if (cur != idle_thread) 
     /* always put thread into ready_list in ordered */
-    list_insert_ordered(&ready_list,&cur->elem,priority_higher,NULL);
+    list_insert_ordered(&ready_list,&cur->elem,priority_decrease,NULL);
 
   cur->status = THREAD_READY;
   schedule ();
@@ -383,10 +370,10 @@ void
 thread_set_priority (int new_priority) 
 {
     //we need to set old priority as well,and yield if change to lower priority 
-    struct list_elem *e = list_max (&ready_list, priority_higher, NULL);
+    struct list_elem *e = list_max (&ready_list, priority_decrease, NULL);
     bool yd = false;
     if(!list_empty(&ready_list) &&
-         (thread_current ()->priority < list_entry(e,struct thread, elem)->priority))
+         (new_priority < list_entry(e,struct thread, elem)->priority))
             yd = true;
 
   if(thread_current()->priority == thread_current()->priority_old)
@@ -523,7 +510,7 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
-  // initial old priority as equal as priority
+  // initial old priority equal to priority
   t->priority_old = t->priority;
   t->magic = THREAD_MAGIC;
   list_push_back (&all_list, &t->allelem);
@@ -554,9 +541,8 @@ next_thread_to_run (void)
     return idle_thread;
   else
     {
-  //   return list_entry (list_pop_front (&ready_list), struct thread, elem);
-    struct list_elem *ready_e = list_max (&ready_list, priority_lower, NULL);
-     return list_entry (ready_e, struct thread, elem);
+       return list_entry (list_max (&ready_list, priority_increase, NULL),
+                        struct thread, elem);
     }
 }
 
@@ -616,10 +602,8 @@ thread_schedule_tail (struct thread *prev)
 static void
 schedule (void) 
 {
-  /* L: donate may change the next_thread_to_run ()
-   * We must perform a donate check before call it. */
-  if (donate_check ())
-      donate_do();
+    //donate priority to lock holder from waiter list if needed.
+    donate();
   struct thread *cur = running_thread ();
   struct thread *next = next_thread_to_run ();
   struct thread *prev = NULL;
@@ -649,15 +633,11 @@ allocate_tid (void)
 
   return tid;
 }
-
-/* Offset of `stack' member within `struct thread'.
-   Used by switch.S, which can't figure it out on its own. */
-//
-/*By W:Sleep the thread,called by timer_sleep()*/
+/*called in timer_sleep()*/
 void
-thread_sleep(int64_t s_ticks) 
+thread_sleep(int64_t sl) 
 {
-  struct thread *cur = thread_current ();
+    struct thread *cur = thread_current();
   enum intr_level old_level;
   
   ASSERT (!intr_context ());
@@ -665,44 +645,61 @@ thread_sleep(int64_t s_ticks)
   
   if (cur != idle_thread) 
   { 
-      cur->wakeup_tick=timer_ticks()+s_ticks;
+      cur->wakeup_tick=timer_ticks()+sl;
       cur->status = THREAD_BLOCKED;
-      list_insert_ordered(&block_list,&cur->elem,sleep_less,NULL);
+      list_insert_ordered(&block_list,&cur->elem,sleep_func,NULL);
   }
   
   schedule();
   intr_set_level (old_level);
 }
 
-/* By W:Wakeup the block thread*/
+/* wakeup a block thread*/
 void 
 thread_wakeup()
 {
-  struct list_elem *temp,*mid;
-  struct thread *st;
+  struct list_elem *e;
+  struct thread *t;
+  struct list_elem *tmp;
+/*
+  e = list_max(&block_list, sleep_func, NULL);
+  t = list_entry(e,struct thread,elem);
 
-  for (temp= list_begin (&block_list); temp != list_end (&block_list);
-       )
+//  e = list_begin(&block_list);
+//  while(e != list_end(&block_list))
+//  {
+//      t = list_entry(e,struct thread,elem);
+      if(t->wakeup_tick >= timer_ticks())
+      {
+        tmp = list_remove(e);
+//        t = list_entry(e,struct thread,elem);
+        thread_unblock(t);
+//        e = tmp;
+      }
+//      else
+//          break;
+//  }
+ */ 
+  for (e= list_begin(&block_list); e != list_end(&block_list);)
     {  
-      st = list_entry (temp, struct thread, elem);
+      t = list_entry (e, struct thread, elem);
         
-      if(timer_ticks()>=st->wakeup_tick)
+      if(timer_ticks()>=t->wakeup_tick)
         {
-          mid=list_remove(temp);
-          st = list_entry (temp, struct thread, elem);
-          thread_unblock(st);
-          temp=mid;
+          tmp=list_remove(e);
+          t = list_entry (e, struct thread, elem);
+          thread_unblock(t);
+          e=tmp;
         }
         else 
-        {
           break;
-        }
-    } 
+    }
+    
 }
 
 /*By W:Compares the value of two thread's wakeup_tick A and B,*/
-bool sleep_less (const struct list_elem *a,
-                  const struct list_elem *b,void *aux)
+bool sleep_func(const struct list_elem *a,const struct list_elem *b,
+                void *aux UNUSED)
 {
   struct thread *a_thread,*b_thread;
   a_thread=list_entry (a, struct thread, elem);
@@ -711,21 +708,20 @@ bool sleep_less (const struct list_elem *a,
   return(a_thread->wakeup_tick<b_thread->wakeup_tick);
 }
 
-/* L: Used in the unblock to insert thread to ready_list ordered by
- * thread's priority. When schedule, we just take the top one out.
- * NOW IT's DANGEROUS TO USE IT, it will cause list_max() returns min*/
-bool priority_higher (const struct list_elem *a,
-                  const struct list_elem *b,void *aux)
+//a decrease function only used by ready list.
+bool priority_decrease (const struct list_elem *a,
+                  const struct list_elem *b,void *aux UNUSED)
 {
-  struct thread *a_thread,*b_thread;
-  a_thread=list_entry (a, struct thread, elem);
-  b_thread=list_entry (b, struct thread,elem);
+ // struct thread *a_thread,*b_thread;
+//  a_thread=list_entry (a, struct thread, elem);
+ // b_thread=list_entry (b, struct thread,elem);
 
-  return(a_thread->priority > b_thread->priority);
+  return(list_entry (a, struct thread, elem)->priority > 
+                    list_entry (b, struct thread,elem)->priority);
 }
-/* L: priority Lower func */
-bool priority_lower (const struct list_elem *a,
-                  const struct list_elem *b,void *aux)
+/* as increase order help function  */
+bool priority_increase (const struct list_elem *a,
+                  const struct list_elem *b,void *aux UNUSED)
 { 
    struct thread *a_thread,*b_thread;
    a_thread=list_entry (a, struct thread, elem);
@@ -734,72 +730,14 @@ bool priority_lower (const struct list_elem *a,
    return(a_thread->priority < b_thread->priority);
 }
 
-bool lock_lower (const struct list_elem *a,
-           const struct list_elem *b,
-           void *aux UNUSED)
-{ 
-  struct thread *ah = list_entry (a, struct lock_elem, elem)->lock->holder;
-  struct thread *bh = list_entry (b, struct lock_elem, elem)->lock->holder;
-  int ap, bp;
-  if (ah == NULL) ap = 0;
-  else ap = ah->priority;
-  if (bh == NULL) bp = 0;
-  else bp = bh->priority;
-  return (ap < bp);
-}
-
-bool cond_lower (const struct list_elem *a,
-           const struct list_elem *b,
-           void *aux UNUSED)
+/* donate priority function, donate if high priority waiter is 
+ * wating for lock holder */
+void donate(void)
 {
-  struct semaphore *as = &list_entry (a, struct semaphore_elem, elem)->semaphore;
-  struct semaphore *bs = &list_entry (b, struct semaphore_elem, elem)->semaphore;
-  int ap = list_entry (list_begin (&as->waiters) , struct thread, elem)->priority;
-  int bp = list_entry (list_begin (&bs->waiters) , struct thread, elem)->priority;
-  if (ap < bp) return true;
-  return false;
-}
-
-/* L: Check if some waiter has a higher priority,
- * that is, we need a donation. */
-bool donate_check (void)
-{
-  struct list_elem *e;
-
-  for (e = list_begin (&lock_list); e != list_end (&lock_list); 
-       e = list_next (e))
+    struct list_elem *e;
+    for(e = list_rbegin(&lock_list);e != list_rend(&lock_list);e = list_prev(e))
     {
-      struct lock_elem *lock_e = list_entry (e, struct lock_elem, elem);
 
-      /* L: no holder or no waiter means no donate. */
-      if (lock_e->lock->holder == NULL)
-         continue;
-      if (list_empty (&lock_e->lock->semaphore.waiters))
-         continue;
-      /* L: Find the max priorty in waiters */
-      struct list_elem *max_e = list_max (&lock_e->lock->semaphore.waiters, 
-                                          priority_lower, NULL);
-      struct thread *max_waiter = list_entry (max_e, struct thread, elem);
-
-      if (max_waiter == NULL)
-         continue;
-      /* L: A donation is needed */
-      if (lock_e->lock->holder->priority < max_waiter->priority)
-         return true;
-     }
-   return false;
-}
-
-/* L: Find the max priority in waiters, and donate it to holder. */
-void donate_do (void)
-{ 
-  list_sort (&lock_list, lock_lower, NULL);
-  struct list_elem *e;
-  /* L: The higher priority is at the end, So we search it from back to
-   * front. */
-  for (e = list_rbegin (&lock_list); e != list_rend (&lock_list);
-       e = list_prev (e))
-    {
       struct lock_elem *lock_e = list_entry (e, struct lock_elem, elem);
       struct thread *holder = lock_e->lock->holder;
       if (holder == NULL)
@@ -812,6 +750,38 @@ void donate_do (void)
       {
         holder->priority = max_waiter->priority;
       }
+      /*
+        struct lock_elem *el = list_entry(e, struct lock_elem, elem);
+        
+        if(el->lock->holder == NULL)
+            continue;
+        if(list_empty(&(el->lock->semaphore.waiters)))
+            continue;
+       list_sort(&(el->lock->semaphore.waiters),priority_increase,NULL);
+        struct list_elem *m = list_rbegin(&el->lock->semaphore.waiters);
+        struct thread *high_p_waiter = list_entry(m,struct thread,elem);
+        if(high_p_waiter == NULL)
+            continue;
+
+        if (high_p_waiter->priority > el->lock->holder->priority)
+        {
+          el->lock->holder->priority = high_p_waiter->priority;
+        }
+        */
     }
 }
+
+bool condition_lower (const struct list_elem *a, 
+                   const struct list_elem *b, 
+                              void *aux UNUSED)
+{
+      struct semaphore *a_s = &list_entry (a, struct semaphore_elem, elem)->semaphore;
+      struct semaphore *b_s = &list_entry (b, struct semaphore_elem, elem)->semaphore;
+      int a_p = list_entry (list_begin (&a_s->waiters) , struct thread, elem)->priority;
+      int b_p = list_entry (list_begin (&b_s->waiters) , struct thread, elem)->priority;
+      if (a_p < b_p) return true;
+        return false;
+}
+
+
 
