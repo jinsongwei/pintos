@@ -136,7 +136,7 @@ main (void)
   shutdown ();
   thread_exit ();
 }
-
+
 /* Clear the "BSS", a segment that should be initialized to
    zeros.  It isn't actually stored on disk or zeroed by the
    kernel loader, so we have to zero it ourselves.
@@ -285,9 +285,7 @@ run_task (char **argv)
   
   printf ("Executing '%s':\n", task);
 #ifdef USERPROG
-  struct exec exec;exec.success = false;sema_init(&exec.loaded,0);
-  exec.file_name = task;
-  process_wait (process_execute (&exec));
+  process_wait (process_execute (task));
 #else
   run_test (task);
 #endif

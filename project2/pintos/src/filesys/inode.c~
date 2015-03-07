@@ -345,4 +345,15 @@ inode_length (const struct inode *inode)
 {
   return inode->data.length;
 }
+Hide details
+Change log
+r17 by xiaotj1990327 on Dec 15, 2010   Diff
+All 76 tests passed
+Go to: 	
+Older revisions
+ r2 by mayli.he on Nov 9, 2010   Diff 
+All revisions of this file
+File info
+Size: 9998 bytes, 347 lines
+View raw file
 
