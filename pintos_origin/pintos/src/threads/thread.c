@@ -301,6 +301,7 @@ thread_exit (void)
   list_remove (&thread_current()->allelem);
   thread_current ()->status = THREAD_DYING;
   schedule ();
+  
   NOT_REACHED ();
 }
 
@@ -337,6 +338,17 @@ thread_foreach (thread_action_func *func, void *aux)
       struct thread *t = list_entry (e, struct thread, allelem);
       func (t, aux);
     }
+}
+
+struct thread* thread_by_tid(tid_t tid)
+{
+  struct list_elem *e;
+  for(e = list_begin(&all_list); e != list_end(&all_list); e = list_next(e))
+  {
+    struct thread *t = list_entry(e, struct thread, allelem);
+    if(t->tid == tid) return t;
+  }
+  return NULL;
 }
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
@@ -383,7 +395,7 @@ thread_get_recent_cpu (void)
   /* Not yet implemented. */
   return 0;
 }
-
+
 /* Idle thread.  Executes when no other thread is ready to run.
 
    The idle thread is initially put on the ready list by
@@ -432,7 +444,7 @@ kernel_thread (thread_func *function, void *aux)
   function (aux);       /* Execute the thread function. */
   thread_exit ();       /* If function() returns, kill the thread. */
 }
-
+
 /* Returns the running thread. */
 struct thread *
 running_thread (void) 
@@ -465,10 +477,18 @@ init_thread (struct thread *t, const char *name, int priority)
 
   memset (t, 0, sizeof *t);
   t->status = THREAD_BLOCKED;
-  strlcpy (t->name, name, sizeof t->name);
+  
+  int cnt = 0;
+  while(name[cnt] != ' ' && name[cnt] != '\0') cnt++;
+  
+  strlcpy (t->name, name, cnt+1);
+
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
+  t->next_handle = 2;
+  list_init(&(t->children));
+  list_init(&(t->fds));
   list_push_back (&all_list, &t->allelem);
 }
 
@@ -581,7 +601,7 @@ allocate_tid (void)
 
   return tid;
 }
-
+
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);

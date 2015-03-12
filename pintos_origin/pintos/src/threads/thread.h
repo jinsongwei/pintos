@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "synch.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -13,6 +14,13 @@ enum thread_status
     THREAD_BLOCKED,     /* Waiting for an event to trigger. */
     THREAD_DYING        /* About to be destroyed. */
   };
+
+struct wait_status {
+  struct semaphore done;
+  int exit_status;
+  int tid;
+  struct list_elem elem;
+};
 
 /* Thread identifier type.
    You can redefine this to whatever type you like. */
@@ -96,6 +104,11 @@ struct thread
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
+struct file* this_file;
+struct list children;
+struct wait_status* wait_status;
+struct list fds;
+int next_handle;
 #endif
 
     /* Owned by thread.c. */
@@ -125,6 +138,7 @@ const char *thread_name (void);
 
 void thread_exit (void) NO_RETURN;
 void thread_yield (void);
+struct thread* thread_by_tid(tid_t tid);
 
 /* Performs some operation on thread t, given auxiliary data AUX. */
 typedef void thread_action_func (struct thread *t, void *aux);
