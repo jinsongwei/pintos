@@ -5,9 +5,38 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "userprog/pagedir.h"
+#include "userprog/syscall.h"
+#include <string.h>
+#include "devices/input.h"
+#include "devices/shutdown.h"
+#include "filesys/directory.h"
+#include "filesys/filesys.h"
+#include "filesys/file.h"
+#include "threads/init.h"
+#include "threads/malloc.h"
+#include "threads/palloc.h"
 
+void sys_halt(void);
+void sys_exit(int );
+//void sys_exit(void );
+pid_t sys_exec(const char *);
+int sys_wait(pid_t );
+int sys_filesize(int );
+
+bool sys_create(const char* , unsigned );
+bool sys_remove(const char* );
+int sys_open(const char *);
+
+int sys_read(int , void *, unsigned );
+int sys_write(int , void *, unsigned );
+void sys_seek(int , unsigned );
+unsigned sys_tell(int );
+void sys_close(int );
+bool verify_user(const void *);
 
 static void syscall_handler (struct intr_frame *);
+typedef int syscall_function (int, int, int);
 
 void
 syscall_init (void) 
@@ -16,55 +45,21 @@ syscall_init (void)
   lock_init(&fs_lock);
 }
 
-static void
-syscall_handler (struct intr_frame *f UNUSED) 
+static struct file_descriptor *lookup_fd (int handle)
 {
-  if(is_kernel_vaddr(f->esp))
-    sys_exit(-1);
-
-  typedef int syscall_function (int, int, int);
-
-  struct syscall
-  {
-    size_t arg_cnt;
-    syscall_function* func;
-  };
-
-  static const struct syscall syscall_table[] = 
-  {
-    {0,(syscall_function*) sys_halt},   //0
-    {1,(syscall_function*) sys_exit},   //1
-    {1,(syscall_function*) sys_exec},   //2
-    {1,(syscall_function*) sys_wait},   //3
-    {2,(syscall_function*) sys_create}, //4
-    {1,(syscall_function*) sys_remove}, //5
-    {1,(syscall_function*) sys_open},   //6
-    {1,(syscall_function*) sys_filesize},//7
-    {3,(syscall_function*) sys_read},   //8
-    {3,(syscall_function*) sys_write},  //9
-    {2,(syscall_function*) sys_seek},   //10
-    {1,(syscall_function*) sys_tell},   //11
-    {1,(syscall_function*) sys_close}   //12
-  };
-
-  struct syscall* sc;
-  unsigned call_nr;
-  int args[3];
-
-  copy_in (&call_nr, f->esp, sizeof call_nr);
-
-  if (call_nr >= (sizeof syscall_table)/(sizeof *syscall_table))
-    thread_exit();
-  sc = syscall_table + call_nr;
-
-  ASSERT (sc->arg_cnt <= (sizeof args)/(sizeof *args));
-  memset (args, 0, sizeof args);
-  copy_in (args, (uint32_t *) f->esp + 1, sizeof *args * sc->arg_cnt);
-
-  f->eax = sc->func (args[0], args[1], args[2]);
+  struct thread *cur = thread_current();
+  struct list_elem *descs;
+  for (descs = list_begin(&cur->fds); descs != list_end(&cur->fds); descs = list_next(descs)){
+      struct file_descriptor *fd = list_entry(descs, struct file_descriptor, elem);
+      if (fd->handle == handle){
+          return fd;
+      }
+  }
+  sys_exit(-1);
+  return NULL; 
 }
 
-/* Copies a byte from user address USRC to kernel address DST. */
+
 static inline int
 get_user (uint8_t *dst, const uint8_t *usrc)
 {
@@ -84,43 +79,95 @@ get_user (uint8_t *dst, const uint8_t *usrc)
   }
 }
 
-/* Writes BYTE to user address UDST. */
-static inline int
-put_user (uint8_t *udst, uint8_t byte)
+
+static void
+copy_in (void *dst_, void *usrc_, size_t size) 
 {
-  if(is_user_vaddr(udst))
-  {
-    int eax;
-    asm ("movl $1f, %%eax; movb %b2, %0; 1:" : "=m" (*udst), "=&a" (eax) : "q" (byte));
-    return eax != 0;
-  }
-  else
-  {
-    return 0;
-  }
+  uint8_t *dst = dst_;
+  uint8_t *usrc = usrc_;
+  uint8_t i = 0;
+    while(i < size)
+    {
+        if(!get_user(dst + i, usrc+i))
+            return;
+        i++;
+    }
+
+}
+bool verify_user(const void *uad)
+{
+    if(uad == NULL)
+    {
+        return false;
+    }
+    return (uad< PHYS_BASE
+          && pagedir_get_page (thread_current ()->pagedir, uad) != NULL);
 }
 
-int copy_in (uint8_t* dest, uint8_t* src, uint8_t size)
-{
-  uint8_t i = 0;
-  for(; i < size; i++)
+static void
+syscall_handler (struct intr_frame *f UNUSED) 
+{  
+    struct syscall
   {
-    if(!get_user(dest+i, src+i))
-        return 0;
-  }
-  return 1;
+    size_t arg_cnt;
+    syscall_function* func;
+  };
+
+  static const struct syscall syscall_table[] = 
+  {
+    {0,(syscall_function*) sys_halt},   
+    {1,(syscall_function*) sys_exit},  
+    {1,(syscall_function*) sys_exec},   
+    {1,(syscall_function*) sys_wait},   
+    {2,(syscall_function*) sys_create}, 
+    {1,(syscall_function*) sys_remove}, 
+    {1,(syscall_function*) sys_open},   
+    {1,(syscall_function*) sys_filesize},
+    {3,(syscall_function*) sys_read},  
+    {3,(syscall_function*) sys_write},  
+    {2,(syscall_function*) sys_seek},   
+    {1,(syscall_function*) sys_tell},   
+    {1,(syscall_function*) sys_close}   
+  };
+
+  const struct syscall* sc;
+  unsigned call_nr;
+  int args[3];
+
+    if(!verify_user(f->esp))
+    {
+        sys_exit(-1);
+    }
+  //get system call
+  copy_in (&call_nr, f->esp, sizeof call_nr);
+
+  if (call_nr >= (sizeof syscall_table)/(sizeof *syscall_table))
+    thread_exit();
+  sc = syscall_table + call_nr;
+
+  //get system call arguments
+  ASSERT (sc->arg_cnt <= (sizeof args)/(sizeof *args));
+  memset (args, 0, sizeof args);
+  copy_in (args, (uint32_t *) f->esp + 1, sizeof *args * sc->arg_cnt);
+
+  //execute system call
+  f->eax = sc->func (args[0], args[1], args[2]);
 }
+
 
 void sys_halt(void)
 {
-  shutdown_power_off();
+  shutdown();
 }
 
 void sys_exit(int status) 
 {
-  struct thread* t = thread_current ();
-  t->wait_status->exit_status = status;
-  printf("%s: exit(%d)\n", thread_current()->name, status);
+    struct thread* t = thread_current ();
+    t->wait_status->exit_status = status;
+  
+ // t->wait_status->exit_status = status;
+
+  printf("%s: exit(%d)\n", t->name, t->wait_status->exit_status);
 
   file_close(t->this_file);
 
@@ -128,17 +175,20 @@ void sys_exit(int status)
   thread_exit();
 }
 
-pid_t sys_exec(const char *cmd_line)
+pid_t sys_exec(const char *ufile)
 {
+
   struct exec exec;
   exec.success = false;
   sema_init(&exec.loaded,0);
-  exec.file_name = cmd_line;
+  exec.file_name = ufile;
   int pid = process_execute(&exec);
+  //palloc_free_page(ufile);
   if (!exec.success)
     pid = -1;
   return pid;
 }
+
 
 struct wait_status* find_child (tid_t child_tid)
 {
@@ -154,6 +204,7 @@ struct wait_status* find_child (tid_t child_tid)
   }
   return child_wait_status;
 }
+
 
 void empty_children (struct thread* t)
 {
@@ -171,6 +222,7 @@ void empty_children (struct thread* t)
   }
 }
 
+
 int sys_wait(pid_t pid)
 {
   int exit_status = -1;
@@ -185,15 +237,18 @@ int sys_wait(pid_t pid)
   return exit_status;
 }
 
+
 bool sys_create(const char* file, unsigned initial_size)
 {
-  if(file == NULL) sys_exit(-1);
+  if(!verify_user(file))
+     sys_exit(-1);
   return filesys_create(file, initial_size);
 }
 
 bool sys_remove(const char* file)
 {
-  if (file == NULL) sys_exit(-1);
+ if(!verify_user(file))
+     sys_exit(-1);
   return filesys_remove(file);
 }
 
@@ -201,9 +256,9 @@ int sys_open (const char *ufile)
 {
   struct file_descriptor *fd;
   int handle = -1;
-
-  if (ufile == NULL) sys_exit(-1);
-
+    if(!verify_user(ufile))
+     sys_exit(-1);
+  
   fd = malloc (sizeof *fd);
   if (fd != NULL)
   {
@@ -224,68 +279,121 @@ int sys_open (const char *ufile)
 
 int sys_filesize(int fd)
 {
-  struct file_descriptor* file_d = get_file(fd);
-  int len = -1;
-  if (file_d == NULL) sys_exit(-1);
-  len = file_length(file_d->file);
+  struct file_descriptor* file_d = lookup_fd(fd);
+  if(file_d == NULL)
+     sys_exit(-1);
+  lock_acquire(&fs_lock);
+  
+  int len = file_length(file_d->file);
+  lock_release(&fs_lock);
   return len;
 }
 
-int sys_read(int fd, void *buffer, unsigned size)
+int sys_read (int handle, void *udst_, unsigned size) 
 {
-  if (!is_user_vaddr(buffer)) sys_exit(-1);//exit if the buffer to read to is not in user space
-  int bytes_read = -1;
+  uint8_t *udst = udst_;
+  struct file_descriptor *fd = NULL;
+  int bytes_read = 0;
 
-  if (fd == STDIN_FILENO)
-  {
-    for (bytes_read = 0; bytes_read < size; bytes_read++)
-      *((char*)buffer+bytes_read) = input_getc();
+  if(handle != STDIN_FILENO)
+      fd = lookup_fd(handle);
+  if(fd == NULL)
+      return -1;
+
+  lock_acquire(&fs_lock);
+  while(size > 0){
+      size_t pages_left = PGSIZE - pg_ofs(udst);
+      size_t read_amt = size < pages_left ? size : pages_left;
+      off_t retval;
+
+      if(!verify_user(udst))
+      {
+          lock_release(&fs_lock);
+          thread_exit();
+      }
+      if(handle == STDIN_FILENO)
+      {
+          strlcat(udst, input_getc(), 1);
+          retval = 1;
+      }else{
+          retval = file_read(fd->file, udst, read_amt);
+      }
+      if(retval < 0)
+      {
+          if (bytes_read == 0)
+              bytes_read = -1;
+          break;
+      }
+      bytes_read += retval;
+      if(retval != (off_t) read_amt)
+          break;
+      udst += retval;
+      size -= retval;
   }
-  else if (fd == STDOUT_FILENO) sys_exit(-1);//read from stdout == BAD
-  else
-  {
-    lock_acquire(&fs_lock);
-    struct file_descriptor* file_d = get_file(fd);
-    if (file_d != NULL)
-      bytes_read = file_read (file_d->file,buffer,size);
-    lock_release(&fs_lock);
-  }
+  lock_release(&fs_lock);
   return bytes_read;
 }
-
-int sys_write(int fd, void *buffer, unsigned size)
+int sys_write (int handle, void *usrc_, unsigned size) 
 {
-  int bytes_written = -1;
+  uint8_t *usrc = usrc_;
+  struct file_descriptor *fd = NULL;
+  int bytes_written = 0;
 
-  if (!is_user_vaddr(buffer)) sys_exit(-1);
-  if(fd == STDOUT_FILENO) {
-    putbuf(buffer, size);
-    bytes_written = size;
+  if(!verify_user(usrc_) || !verify_user(usrc_+size)){
+      sys_exit(-1);
   }
-  else if (fd == STDIN_FILENO)
-    sys_exit(-1);
-  else
-  {
-    lock_acquire(&fs_lock);
-    struct file_descriptor* file_d = get_file(fd);
-    if (file_d != NULL)
-      bytes_written = file_write(file_d->file,buffer,size);
-    lock_release(&fs_lock);
-  }
+  if (handle != STDOUT_FILENO)
+    fd = lookup_fd (handle);
 
+  lock_acquire (&fs_lock);
+  while (size > 0) 
+    {
+      size_t page_left = PGSIZE - pg_ofs (usrc);
+      size_t write_amt = size < page_left ? size : page_left;
+      off_t retval;
+
+      if (!verify_user (usrc)) 
+        {
+          lock_release (&fs_lock);
+          sys_exit(-1);
+        }
+
+      if (handle == STDOUT_FILENO)
+        {
+          putbuf (usrc, write_amt);
+          retval = write_amt;
+        }
+      else
+        retval = file_write (fd->file, usrc, write_amt);
+      if (retval < 0) 
+        {
+          if (bytes_written == 0)
+            bytes_written = -1;
+          break;
+        }
+      bytes_written += retval;
+
+      if (retval != (off_t) write_amt)
+        break;
+
+      usrc += retval;
+      size -= retval;
+    }
+  lock_release (&fs_lock);
+ 
   return bytes_written;
 }
 
 void sys_seek(int fd, unsigned position)
 {
-  struct file_descriptor* file_d = get_file(fd);
+  struct file_descriptor* file_d = lookup_fd(fd);
   if (file_d == NULL) sys_exit(-1);
   file_seek(file_d->file,position);
 }
 
 unsigned sys_tell(int fd)
 {
-  struct file_descriptor* file_d = get_file(fd);
+  struct file_descriptor* file_d = lookup_fd(fd);
   if (file_d == NULL) sys_exit(-1);
 
   return file_tell(file_d);
@@ -293,26 +401,14 @@ unsigned sys_tell(int fd)
 
 void sys_close(int fd)
 {
-  struct file_descriptor* file_d = get_file(fd);
-  if (file_d == NULL) sys_exit(-1);
+  struct file_descriptor* file_d = lookup_fd(fd);
+  if (file_d == NULL) 
+    sys_exit(-1);
 
   lock_acquire(&fs_lock);
   file_close(file_d->file);
-  list_remove(&(file_d->elem));
+  list_remove(&file_d->elem);
   free(file_d);
   lock_release(&fs_lock);
 }
 
-struct file_descriptor* get_file(int fd)
-{
-  struct list_elem* e;
-  struct file_descriptor* file_d = NULL;
-  struct thread* t = thread_current();
-  for (e = list_begin (&(t->fds)); e != list_end (&(t->fds)); e = list_next(e))
-  {
-    file_d = list_entry (e, struct file_descriptor, elem);
-    if (file_d->handle == fd) break;
-    else file_d = NULL;
-  }
-  return file_d;
-}
