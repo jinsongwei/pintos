@@ -152,7 +152,6 @@ page_fault (struct intr_frame *f)
   {
     f->eip = f->eax;
     f->eax = 0xffffffff;
-
     sys_exit(-1);
   }
   else

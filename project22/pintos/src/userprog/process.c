@@ -28,51 +28,35 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp);
 tid_t
 process_execute (struct exec* exec) 
 {
-  char *file_name = exec->file_name;
-  char *fn_copy;
+  char *temp;
   tid_t tid;
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
-  fn_copy = palloc_get_page (0);
-  if (fn_copy == NULL)
+  temp = palloc_get_page (0);
+  if (temp == NULL)
     return TID_ERROR;
-  strlcpy (fn_copy, file_name, PGSIZE);
-  exec->file_name = fn_copy;
-  /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, exec);
-
-  struct thread* t = thread_by_tid(tid);
-  
-  if (tid == TID_ERROR)
-    palloc_free_page (fn_copy);
-  else
-  {
-    sema_down(&exec->loaded);
-    exec->wait_status->tid = tid;
-    if (exec->success)
-      list_push_back (&thread_current ()->children,
-                       &exec->wait_status->elem);
-    else
-      tid = TID_ERROR;
+  else{
+        strlcpy (temp, exec->file_name, PGSIZE);
+        exec->file_name = temp;
+    
+      //create new thread for exec->file_name
+      tid = thread_create (exec->file_name, PRI_DEFAULT, start_process, exec);
+      
+      if (tid == TID_ERROR)
+        palloc_free_page (temp);
+      else
+      {
+        sema_down(&exec->loaded);
+        exec->wait_status->tid = tid;
+        if (exec->success)
+          list_push_back (&thread_current()->children,
+                           &exec->wait_status->elem);
+        else
+         tid = TID_ERROR;
+      }
   }
 
   return tid;
-}
-
-int get_count(const char* s)
-{
-
-  char* news = malloc(sizeof(char)*(strlen(s)+1));
-  strlcpy(news, s, strlen(s)+1);
-  char *token, *save_ptr;
-  int i = 0;
-  for (token = strtok_r (news, " ", &save_ptr); token != NULL;
-       token = strtok_r (NULL, " ", &save_ptr))
-  {
-     i++;
-  }
-  free(news);
-  return i;
 }
 
 /* A thread function that loads a user process and starts it
@@ -83,18 +67,27 @@ start_process (void* exec_)
   struct exec* exec = (struct exec*) exec_;
   void* file_name_ = (void*) exec->file_name;
   char *fn_copy;
+  char *token, *save_ptr;
+  int c = 0;
+
   fn_copy = palloc_get_page (PAL_USER);
   
   if (fn_copy == NULL)
     thread_exit ();
   strlcpy (fn_copy, (char*)file_name_, PGSIZE);
+
   
-  int c = get_count(fn_copy);
-
-
+  char* news = malloc(sizeof(char)*(strlen(fn_copy)+1));
+  strlcpy(news, fn_copy, strlen(fn_copy)+1);
+  
+  for (token = strtok_r (news, " ", &save_ptr); token != NULL;
+       token = strtok_r (NULL, " ", &save_ptr))
+  {
+     c++;
+  }
+  free(news);
   int* v = malloc(sizeof(int)*c);
   
-  char *token, *save_ptr;
   int i = 0;
   for (token = strtok_r (fn_copy, " ", &save_ptr); token != NULL;
        token = strtok_r (NULL, " ", &save_ptr))
@@ -136,19 +129,18 @@ start_process (void* exec_)
     if_.esp -= 4;
     *(int *)(if_.esp) = 0;
 
-    /* Now pushing argv[x], and this is where the fun begins */
     for (i = c - 1; i >= 0; i--)
     {
       if_.esp -= 4;
-      *(void **)(if_.esp) = old_esp + v[i]; /* argv[x] */
+      *(void **)(if_.esp) = old_esp + v[i]; 
     }
 
     if_.esp -= 4;
-    *(char **)(if_.esp) = (if_.esp + 4); /* argv */
+    *(char **)(if_.esp) = (if_.esp + 4); 
     if_.esp -= 4;
     *(int *)(if_.esp) = c;
     if_.esp -= 4;
-    *(int *)(if_.esp) = 0; // fake return address
+    *(int *)(if_.esp) = 0; 
 
     exec->wait_status = thread_current()->wait_status = malloc(sizeof(struct wait_status));
     sema_init (&exec->wait_status->done,0);

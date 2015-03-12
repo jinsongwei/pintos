@@ -15,13 +15,6 @@ enum thread_status
     THREAD_DYING        /* About to be destroyed. */
   };
 
-struct wait_status {
-  struct semaphore done;
-  int exit_status;
-  int tid;
-  struct list_elem elem;
-};
-
 /* Thread identifier type.
    You can redefine this to whatever type you like. */
 typedef int tid_t;
@@ -88,6 +81,13 @@ typedef int tid_t;
    only because they are mutually exclusive: only a thread in the
    ready state is on the run queue, whereas only a thread in the
    blocked state is on a semaphore wait list. */
+struct wait_status {
+  struct semaphore done;
+  int exit_status;
+  int tid;
+  struct list_elem elem;
+};
+
 struct thread
   {
     /* Owned by thread.c. */
@@ -138,7 +138,6 @@ const char *thread_name (void);
 
 void thread_exit (void) NO_RETURN;
 void thread_yield (void);
-struct thread* thread_by_tid(tid_t tid);
 
 /* Performs some operation on thread t, given auxiliary data AUX. */
 typedef void thread_action_func (struct thread *t, void *aux);
